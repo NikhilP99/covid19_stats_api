@@ -8,9 +8,12 @@ app.use(cors())
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 
+const jhuData = require('./routes/jhu-data')
+
+app.use('/jhu-data', jhuData)
 
 app.get('/',(req,res)=>{
-    res.send("hello, i am alive")
+    res.send("API service for COVID-19 data")
 })
 
 const PORT = process.env.PORT || 5000
