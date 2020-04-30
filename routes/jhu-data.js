@@ -10,7 +10,9 @@ const cron = require('node-cron');
 var data = {
   total : {},
   current: {},
-  time_series: {}
+  time_series: {},
+  merged_current: {},
+  merged_time_series: {}
 }
 
 const global_stats_source = {
@@ -31,31 +33,60 @@ const correctedCountryNames = {
   "Congo (Kinshasa)": "Republic of the Congo"
 }
 
-//
-// cron.schedule('1 * * * *', () => {
-//   console.log('Updating data'); //each hour
-//   // updateData()
-// });
+//evert hour
+cron.schedule('00 59 * * * *', () => {
+  console.log('Updating data'); //each hour
+  updateData()
+});
 
 let lastUpdated;
 
 router.get('/total',async (req,res) => {
-  var ans = await updateData()
-
   res.json(data.total)
 })
 
 router.get('/current',async (req,res)=>{
-  var ans = await updateData()
+  const country_code = req.query.country_code
+  const merge_countries = req.query.merge_countries
 
-  res.json(data.current)
+  if(merge_countries){
+    var current_data = data.merged_current
+  }else{
+    var current_data = data.current
+  }
+
+  if(country_code){
+    current_data = filteriso2(current_data,country_code)
+    res.send(current_data[0])
+  }
+  else
+    res.send(current_data)
 })
 
 router.get('/time_series',async (req,res)=>{
-  var ans = await updateData()
+  const country_code = req.query.country_code
+  const merge_countries = req.query.merge_countries
 
-  res.json(data.time_series)
+  if(merge_countries){
+    var ts = data.merged_time_series
+  }else{
+    var ts = data.time_series
+  }
+
+  if(country_code){
+    ts = filteriso2(ts,country_code)
+    res.send(ts[0])
+  }
+  else
+    res.send(ts)
 })
+
+function filteriso2 (source, code) {
+  return source.filter(item => {
+    const countryCode = item.countryCode
+    return countryCode === code
+  })
+}
 
 async function updateData(){
   lastUpdated = new Date().toISOString()
@@ -143,11 +174,66 @@ async function updateData(){
   }
 
   data.total = total
-  data.current = current
-  data.time_series = time_series
+  data.current = Object.values(current)
+  data.time_series = Object.values(time_series)
 
-  return total
+  // Uses deep copy
+  const clone_current = JSON.parse(JSON.stringify(current))
+  data.merged_current = merge_same_countries(Object.values(clone_current))
+  const clone_time_series = JSON.parse(JSON.stringify(time_series))
+  data.merged_time_series = merge_same_countries(Object.values(clone_time_series))
+
+  console.log("Update complete")
+
 }
+
+function merge_same_countries(original){
+  merged_data = {}
+
+  for(const data of original){
+    var country_name = data.country_region
+
+    if(merged_data[country_name]){
+      var country_data = merged_data[country_name]
+
+      //for current
+      mergeObject(country_data,data);
+
+      // for time series
+      if (data.time_series) {
+        const ts = data.time_series
+        const merged_time_series = country_data.time_series
+
+        for (const key of Object.keys(ts)) {
+          mergeObject(merged_time_series[key], ts[key])
+        }
+
+        // TODO: replace country locations
+      }
+
+    }else{
+      merged_data[country_name] = data
+    }
+  }
+
+  return Object.values(merged_data)
+}
+
+function mergeObject (target, item) {
+  if (!(target && item)) return
+
+  if (item.confirmed) mergeItem(target, item, 'confirmed')
+  if (item.deaths) mergeItem(target, item, 'deaths')
+  if (item.recovered) mergeItem(target, item, 'recovered')
+}
+
+function mergeItem (target, item, type) {
+  const cur = target[type] ? target[type] : 0
+  const add = item[type] ? item[type] : 0
+
+  target[type] = cur + add
+}
+
 
 function getCSV_to_JSON(store,key){
   //see https://www.npmjs.com/package/csvtojson
@@ -162,7 +248,6 @@ function getCSV_to_JSON(store,key){
                 const country = json['Country/Region']
                 store[country] = json
               }
-
               resolve()
             })
           })
@@ -191,5 +276,7 @@ function defineStructure(store,name,data){
 
   }
 }
+
+updateData()
 
 module.exports = router
